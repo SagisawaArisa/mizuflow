@@ -1,0 +1,29 @@
+# Binaries
+bin/
+dist/
+delta-conf
+
+# Go
+vendor/
+*.test
+*.out
+coverage.txt
+
+# IDEs
+.vscode/
+.github/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
