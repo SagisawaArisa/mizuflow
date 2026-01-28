@@ -13,6 +13,7 @@ type FeatureInterface interface {
 	GetByKey(ctx context.Context, namespace, env, key string) (*model.FeatureMaster, error)
 	GetAll(ctx context.Context) ([]*model.FeatureMaster, error)
 	List(ctx context.Context, namespace, env, search string) ([]*model.FeatureMaster, error)
+	ListByPage(ctx context.Context, offset, limit int) ([]*model.FeatureMaster, error)
 	Save(ctx context.Context, master *model.FeatureMaster) error
 	Rollback(ctx context.Context, namespace, env, key string, version int) (*model.FeatureMaster, error)
 	WithTx(tx *gorm.DB) any
@@ -43,6 +44,12 @@ func (r *FeatureMasterRepository) GetByKey(ctx context.Context, namespace, env, 
 func (r *FeatureMasterRepository) GetAll(ctx context.Context) ([]*model.FeatureMaster, error) {
 	var features []*model.FeatureMaster
 	err := r.db.WithContext(ctx).Find(&features).Error
+	return features, err
+}
+
+func (r *FeatureMasterRepository) ListByPage(ctx context.Context, offset, limit int) ([]*model.FeatureMaster, error) {
+	var features []*model.FeatureMaster
+	err := r.db.WithContext(ctx).Order("id ASC").Offset(offset).Limit(limit).Find(&features).Error
 	return features, err
 }
 

@@ -38,8 +38,10 @@ type EtcdConfig struct {
 }
 
 type WorkersConfig struct {
-	OutboxInterval     time.Duration `mapstructure:"outbox_interval"`
-	ReconcilerInterval time.Duration `mapstructure:"reconciler_interval"`
+	OutboxInterval       time.Duration `mapstructure:"outbox_interval"`
+	ReconcilerInterval   time.Duration `mapstructure:"reconciler_interval"`
+	ReconcilerBatchSize  int           `mapstructure:"reconciler_batch_size"`
+	ReconcilerBatchDelay time.Duration `mapstructure:"reconciler_batch_delay"`
 }
 
 type StreamConfig struct {

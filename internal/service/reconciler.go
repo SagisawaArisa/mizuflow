@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"mizuflow/internal/model"
 	"mizuflow/internal/repository"
 	v1 "mizuflow/pkg/api/v1"
@@ -14,24 +13,33 @@ import (
 	"go.uber.org/zap"
 )
 
+type ReconcilerConfig struct {
+	Interval   time.Duration
+	BatchSize  int
+	BatchDelay time.Duration
+}
+
 type Reconciler struct {
 	etcdClient  *clientv3.Client
 	etcdRepo    *repository.FeatureRepository
 	featureRepo repository.FeatureInterface
-	interval    time.Duration
+	config      ReconcilerConfig
 }
 
-func NewReconciler(client *clientv3.Client, etcdRepo *repository.FeatureRepository, featureRepo repository.FeatureInterface, interval time.Duration) *Reconciler {
+func NewReconciler(client *clientv3.Client, etcdRepo *repository.FeatureRepository, featureRepo repository.FeatureInterface, cfg ReconcilerConfig) *Reconciler {
+	if cfg.BatchSize <= 0 {
+		cfg.BatchSize = 100
+	}
 	return &Reconciler{
 		etcdClient:  client,
 		etcdRepo:    etcdRepo,
 		featureRepo: featureRepo,
-		interval:    interval,
+		config:      cfg,
 	}
 }
 
 func (r *Reconciler) Run(ctx context.Context) {
-	ticker := time.NewTicker(r.interval)
+	ticker := time.NewTicker(r.config.Interval)
 	defer ticker.Stop()
 
 	// Session for distributed lock, tightly coupled with a lease
@@ -44,7 +52,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 
 	mutex := concurrency.NewMutex(session, "/locks/reconciler")
 
-	logger.Info("reconciler started", zap.Duration("interval", r.interval))
+	logger.Info("reconciler started", zap.Duration("interval", r.config.Interval))
 
 	for {
 		select {
@@ -79,79 +87,66 @@ func (r *Reconciler) Run(ctx context.Context) {
 }
 
 func (r *Reconciler) reconcile(ctx context.Context) {
-	// todo batching/cursor
-	// Get all from MySQL
-	dbFeatures, err := r.featureRepo.GetAll(ctx)
+	batchSize := r.config.BatchSize
+	offset := 0
+	for {
+		dbFeatures, err := r.featureRepo.ListByPage(ctx, offset, batchSize)
+		if err != nil {
+			logger.Error("recon: failed to fetch features from db", zap.Error(err))
+			return
+		}
+		if len(dbFeatures) == 0 {
+			break
+		}
+		for _, dbItem := range dbFeatures {
+			r.checkOne(ctx, dbItem)
+		}
+		offset += batchSize
+		logger.Info("reconciliation batch processed", zap.Int("batch_size", len(dbFeatures)), zap.Int("next_offset", offset))
+
+		if r.config.BatchDelay > 0 {
+			time.Sleep(r.config.BatchDelay)
+		}
+	}
+
+	logger.Info("reconciliation finished")
+}
+
+func (r *Reconciler) checkOne(ctx context.Context, dbItem *model.FeatureMaster) {
+	fullKey := BuildFeatureKey(dbItem.Env, dbItem.Namespace, dbItem.Key)
+	etcdFlag, err := r.etcdRepo.GetFeature(ctx, fullKey)
 	if err != nil {
-		logger.Error("recon: failed to fetch features from db", zap.Error(err))
+		logger.Error("recon: failed to get feature from etcd", zap.String("key", fullKey), zap.Error(err))
 		return
 	}
-	dbMap := make(map[string]*model.FeatureMaster)
-	for _, f := range dbFeatures {
-		copy := f
-		fullKey := BuildFeatureKey(f.Env, f.Namespace, f.Key)
-		dbMap[fullKey] = copy
+	shouldFix := false
+	if etcdFlag == nil {
+		shouldFix = true
+	} else if etcdFlag.Version < dbItem.Version {
+		shouldFix = true
 	}
 
-	// Get all from Etcd
-	resp, err := r.etcdRepo.GetWithRevision(ctx, FeatureRootPrefix)
-	if err != nil {
-		logger.Error("recon: failed to fetch features from etcd", zap.Error(err))
-		return
-	}
-	etcdMap := make(map[string]*v1.FeatureFlag)
-	for _, kv := range resp.Kvs {
-		var flag v1.FeatureFlag
-		if err := json.Unmarshal(kv.Value, &flag); err == nil {
-			etcdMap[string(kv.Key)] = &flag
-		}
-	}
-
-	// MySQL has, Etcd missing/old
-	for fullKey, dbModel := range dbMap {
-		// Etcd keys stored as full paths, check logic if keys match
-		etcdFlag, exists := etcdMap[fullKey]
-
-		shouldUpdate := false
-		reason := ""
-
-		if !exists {
-			shouldUpdate = true
-			reason = "missing_in_etcd"
-		} else {
-			// Compare Content.
-			if dbModel.CurrentVal != etcdFlag.Value || dbModel.Type != etcdFlag.Type {
-				shouldUpdate = true
-				reason = "value_mismatch"
+	if shouldFix {
+		logger.Warn("recon: fixing single inconsistency", zap.String("key", fullKey), zap.Int("db_version", dbItem.Version), zap.Int("etcd_version", func() int {
+			if etcdFlag == nil {
+				return 0
 			}
+			return etcdFlag.Version
+		}()))
+
+		// Construct payload
+		flag := v1.FeatureFlag{
+			Namespace: dbItem.Namespace,
+			Env:       dbItem.Env,
+			Key:       dbItem.Key,
+			Value:     dbItem.CurrentVal,
+			Type:      dbItem.Type,
+			Version:   dbItem.Version,
 		}
 
-		if shouldUpdate {
-			logger.Warn("recon: fixing inconsistency", zap.String("key", fullKey), zap.String("reason", reason))
-
-			// Construct payload
-			flag := v1.FeatureFlag{
-				Namespace: dbModel.Namespace,
-				Env:       dbModel.Env,
-				Key:       dbModel.Key,
-				Value:     dbModel.CurrentVal,
-				Type:      dbModel.Type,
-				Version:   dbModel.Version, // Correctly set Business Version
-			}
-
-			_, err := r.etcdRepo.SaveFeatureIfNewer(ctx, fullKey, flag)
-			if err != nil {
-				logger.Error("recon: failed to fix etcd", zap.String("key", fullKey), zap.Error(err))
-			}
+		_, err := r.etcdRepo.SaveFeatureIfNewer(ctx, fullKey, flag)
+		if err != nil {
+			logger.Error("recon: failed to fix etcd", zap.String("key", fullKey), zap.Error(err))
 		}
 	}
-
-	// Etcd has, MySQL missing
-	for fullKey := range etcdMap {
-		if _, exists := dbMap[fullKey]; !exists {
-			logger.Warn("recon: removing orphan key", zap.String("key", fullKey))
-		}
-	}
-
-	logger.Info("reconciliation finished", zap.Int("db_count", len(dbMap)), zap.Int("etcd_count", len(etcdMap)))
 }

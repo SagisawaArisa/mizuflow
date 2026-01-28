@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"slices"
+
 	"go.uber.org/zap"
 )
 
@@ -268,10 +270,8 @@ func (c *MizuClient) matchRule(rule v1.Rule, content map[string]string) bool {
 
 	switch rule.Operator {
 	case "in":
-		for _, target := range rule.Values {
-			if val == target {
-				return true
-			}
+		if slices.Contains(rule.Values, val) {
+			return true
 		}
 	case "eq":
 		return val == rule.Values[0]

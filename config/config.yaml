@@ -18,6 +18,8 @@ etcd:
 workers:
   outbox_interval: 1s
   reconciler_interval: 1h
+  reconciler_batch_size: 100
+  reconciler_batch_delay: 50ms
 
 stream:
   heartbeat_interval: 15s

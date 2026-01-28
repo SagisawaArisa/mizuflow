@@ -19,7 +19,7 @@ type Hub struct {
 	Register   chan *Client
 	Unregister chan *Client
 
-	observer metrics.HubObserver
+	observer          metrics.HubObserver
 	heartbeatInterval time.Duration
 }
 

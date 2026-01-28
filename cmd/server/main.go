@@ -78,7 +78,11 @@ func run(cfg *config.Config) error {
 
 	// 6. Initialize & Start Workers (Background Tasks)
 	outboxWorker := service.NewOutboxWorker(outboxRepo, etcdRepo, cfg.Workers.OutboxInterval)
-	reconciler := service.NewReconciler(etcdCli, etcdRepo, featureRepo, cfg.Workers.ReconcilerInterval)
+	reconciler := service.NewReconciler(etcdCli, etcdRepo, featureRepo, service.ReconcilerConfig{
+		Interval:   cfg.Workers.ReconcilerInterval,
+		BatchSize:  cfg.Workers.ReconcilerBatchSize,
+		BatchDelay: cfg.Workers.ReconcilerBatchDelay,
+	})
 
 	// Start background routines
 	go func() {
