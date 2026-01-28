@@ -224,7 +224,7 @@ func (c *MizuClient) IsEnabled(key string, context map[string]string) bool {
 	if !ok {
 		return false
 	}
-	return val == "true" || val == "1" || val == "on"
+	return val == "true" || val == "True" || val == "TRUE"
 }
 
 func (c *MizuClient) GetString(key string, defaultValue string, context map[string]string) string {
@@ -233,6 +233,26 @@ func (c *MizuClient) GetString(key string, defaultValue string, context map[stri
 		return defaultValue
 	}
 	return val
+}
+
+func (c *MizuClient) GetNumber(key string, defaultValue float64, context map[string]string) float64 {
+	val, ok := c.evaluate(key, context)
+	if !ok {
+		return defaultValue
+	}
+	f, err := strconv.ParseFloat(val, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return f
+}
+
+func (c *MizuClient) GetJSON(key string, target any, context map[string]string) error {
+	val, ok := c.evaluate(key, context)
+	if !ok {
+		return fmt.Errorf("feature not found")
+	}
+	return json.Unmarshal([]byte(val), target)
 }
 
 func (c *MizuClient) evaluate(key string, context map[string]string) (string, bool) {
