@@ -8,13 +8,14 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig  `mapstructure:"server"`
-	MySQL   MySQLConfig   `mapstructure:"mysql"`
-	Redis   RedisConfig   `mapstructure:"redis"`
-	Etcd    EtcdConfig    `mapstructure:"etcd"`
-	Workers WorkersConfig `mapstructure:"workers"`
-	Stream  StreamConfig  `mapstructure:"stream"`
-	Auth    AuthConfig    `mapstructure:"auth"`
+	Server    ServerConfig    `mapstructure:"server"`
+	MySQL     MySQLConfig     `mapstructure:"mysql"`
+	Redis     RedisConfig     `mapstructure:"redis"`
+	Etcd      EtcdConfig      `mapstructure:"etcd"`
+	Workers   WorkersConfig   `mapstructure:"workers"`
+	Stream    StreamConfig    `mapstructure:"stream"`
+	Auth      AuthConfig      `mapstructure:"auth"`
+	RateLimit RateLimitConfig `mapstructure:"ratelimit"`
 }
 
 type ServerConfig struct {
@@ -51,6 +52,10 @@ type StreamConfig struct {
 type AuthConfig struct {
 	AccessTokenTTL  time.Duration `mapstructure:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
+}
+
+type RateLimitConfig struct {
+	RequestsPerSecond int `mapstructure:"requests_per_second"`
 }
 
 func Load() *Config {

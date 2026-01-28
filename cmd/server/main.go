@@ -108,6 +108,8 @@ func run(cfg *config.Config) error {
 		api.NewStreamHandler(svc, hub),
 		api.NewAuthHandler(authSvc),
 		sdkRepo,
+		rdb,
+		cfg.RateLimit.RequestsPerSecond,
 	)
 
 	srv := &http.Server{

@@ -17,7 +17,7 @@ export default function RealtimePanel() {
   const [status, setStatus] = useState<'connected' | 'disconnected' | 'connecting'>('disconnected');
   
   // UI State
-  const [isMinimized, setIsMinimized] = useState(false);
+  const [isMinimized, setIsMinimized] = useState(true);
   const [isMaximized, setIsMaximized] = useState(false);
   const [position, setPosition] = useState<{x: number, y: number} | null>(null);
   const [size, setSize] = useState<{width: number, height: number} | null>(null); // New Size State
@@ -196,7 +196,7 @@ export default function RealtimePanel() {
         ref={panelRef}
         style={getStyle()}
         className={`fixed bg-card border border-border shadow-xl rounded-lg overflow-hidden flex flex-col z-[100] transition-shadow duration-200
-            ${!position && !isMaximized ? 'bottom-4 right-4 w-96' : ''} 
+            ${!position && !isMaximized ? 'bottom-6 left-72 w-96' : ''} 
             ${isMinimized && !isMaximized ? 'w-auto h-auto !width-auto' : ''}
         `}
     >

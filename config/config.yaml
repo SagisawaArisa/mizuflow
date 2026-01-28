@@ -27,3 +27,6 @@ stream:
 auth:
   access_token_ttl: 15m
   refresh_token_ttl: 168h # 7 days
+
+ratelimit:
+  requests_per_second: 5

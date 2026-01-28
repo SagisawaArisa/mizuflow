@@ -6,9 +6,10 @@ import (
 	"mizuflow/internal/repository"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
-func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler, authHandler *AuthHandler, sdkRepo repository.SDKRepository) *gin.Engine {
+func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler, authHandler *AuthHandler, sdkRepo repository.SDKRepository, rdb *redis.Client, requestsPerSecond int) *gin.Engine {
 	r := gin.New()
 
 	// Global Middleware
@@ -59,12 +60,16 @@ func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler
 	// Enable Dev-Pass=true for debugging
 	protected := r.Group("/v1")
 	protected.Use(middleware.JWTMiddleware(true))
+
+	// Rate Limiter for Write Operations
+	writeLimiter := middleware.RateLimitMiddleware(rdb, requestsPerSecond)
+
 	{
-		protected.POST("/feature", featureHandler.CreateFeature)
+		protected.POST("/feature", writeLimiter, featureHandler.CreateFeature)
 		protected.GET("/features", featureHandler.ListFeatures)
 		protected.GET("/feature/:key", featureHandler.GetFeature)
 		protected.GET("/feature/:key/audits", featureHandler.GetFeatureAudits)
-		protected.POST("/feature/:key/rollback", featureHandler.RollbackFeature)
+		protected.POST("/feature/:key/rollback", writeLimiter, featureHandler.RollbackFeature)
 	}
 	return r
 }
