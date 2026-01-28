@@ -199,6 +199,8 @@ func (c *MizuClient) handleUpdate(msg v1.Message) {
 		logger.Warn("stale revision received", zap.Int64("msg_rev", msg.Revision), zap.Int64("last_rev", c.lastRev))
 		return
 	}
+	latency := time.Now().UnixMilli() - msg.UpdatedAt
+	logger.Info("feature update received", zap.String("key", msg.Key), zap.String("action", string(msg.Action)), zap.Int64("rev", msg.Revision), zap.Int64("latency_ms", latency))
 	switch msg.Action {
 	case constraints.DELETE:
 		delete(c.features, msg.Key)

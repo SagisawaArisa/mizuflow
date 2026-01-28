@@ -12,6 +12,7 @@ import (
 	"mizuflow/pkg/constraints"
 	"strconv"
 	"strings"
+	"time"
 
 	"mizuflow/internal/dto/resp"
 
@@ -338,7 +339,6 @@ func (s *FeatureService) Run(ctx context.Context) {
 			return
 		case wresp := <-watchChan:
 			if wresp.Canceled {
-				// TODO rebuild
 				logger.Warn("watch canceled", zap.Error(wresp.Err()))
 				return
 			}
@@ -368,6 +368,7 @@ func (s *FeatureService) Run(ctx context.Context) {
 						Key:       key,
 						Revision:  ev.Kv.ModRevision,
 						Action:    constraints.DELETE,
+						UpdatedAt: time.Now().UnixMilli(),
 					}
 					s.cache.Delete(string(ev.Kv.Key), ev.Kv.ModRevision)
 				} else {
@@ -385,6 +386,7 @@ func (s *FeatureService) Run(ctx context.Context) {
 						Version:   flag.Version,
 						Revision:  ev.Kv.ModRevision,
 						Action:    constraints.PUT,
+						UpdatedAt: time.Now().UnixMilli(),
 					}
 					s.cache.Update(flag)
 				}

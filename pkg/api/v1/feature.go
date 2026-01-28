@@ -36,6 +36,7 @@ type Message struct {
 	Version   int                `json:"version"`
 	Revision  int64              `json:"revision"`
 	Action    constraints.Action `json:"action"`
+	UpdatedAt int64              `json:"updated_at"`
 }
 
 func (f *FeatureFlag) ToJSON() string {

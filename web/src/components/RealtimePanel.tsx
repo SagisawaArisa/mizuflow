@@ -9,6 +9,7 @@ interface StreamMessage {
     env: string;
     version: number;
     value: string;
+    updated_at: number;
 }
 
 export default function RealtimePanel() {
@@ -43,7 +44,10 @@ export default function RealtimePanel() {
     eventSource.onmessage = (event) => {
         try {
             const data: StreamMessage = JSON.parse(event.data);
-            const timestamp = new Date().toLocaleTimeString([], { hour12: false });
+            // Use backend timestamp if available, otherwise fallback to local receipt time
+            const timeDate = data.updated_at ? new Date(data.updated_at) : new Date();
+            const timestamp = timeDate.toLocaleTimeString([], { hour12: false });
+            
             const log = `[${timestamp}] [${data.env}/${data.namespace}] ${data.key} updated to ${data.value}`;
             
             setEvents(prev => [log, ...prev.slice(0, 49)]); // Increased buffer
