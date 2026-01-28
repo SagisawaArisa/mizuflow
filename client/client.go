@@ -245,7 +245,7 @@ func (c *MizuClient) evaluate(key string, context map[string]string) (string, bo
 		return "", false
 	}
 
-	if feature.Type != "strategy" {
+	if feature.Type != constraints.TypeStrategy {
 		return feature.Value, true
 	}
 	var strategy v1.FeatureStrategy

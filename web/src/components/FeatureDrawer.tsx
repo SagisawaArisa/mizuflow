@@ -13,10 +13,12 @@ interface FeatureDrawerProps {
 export default function FeatureDrawer({ feature, isOpen, onClose, onSave }: FeatureDrawerProps) {
   const [formData, setFormData] = useState<Partial<FeatureFlag>>({});
   const [jsonError, setJsonError] = useState('');
+  const [valueCache, setValueCache] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (feature) {
       setFormData({ ...feature });
+      setValueCache({ [feature.type]: feature.value });
     } else {
         setFormData({
             namespace: 'default',
@@ -24,14 +26,106 @@ export default function FeatureDrawer({ feature, isOpen, onClose, onSave }: Feat
             type: 'bool',
             value: 'false'
         });
+        setValueCache({ 'bool': 'false' });
     }
   }, [feature, isOpen]);
 
   if (!isOpen) return null;
 
+  const validatePayload = (type: string, value: string): string | null => {
+      switch (type) {
+          case 'bool':
+              if (value !== 'true' && value !== 'false') return 'Invalid boolean value';
+              break;
+          case 'number':
+              if (isNaN(Number(value))) return 'Invalid number value';
+              break;
+          case 'json':
+              try {
+                  JSON.parse(value);
+              } catch (e) {
+                  return 'Invalid JSON format';
+              }
+              break;
+          case 'strategy':
+              try {
+                  const s = JSON.parse(value);
+                  if (!s.default_value) return 'Strategy must have a default_value';
+                  if (!Array.isArray(s.rules)) return 'Strategy must have rules array';
+                  for (const r of s.rules) {
+                      if (!r.attribute || !r.operator) return 'Rules must have attribute and operator';
+                  }
+              } catch (e) {
+                  return 'Invalid JSON format';
+              }
+              break;
+      }
+      return null;
+  };
+
+  const handleValueChange = (val: string) => {
+     setFormData({ ...formData, value: val });
+     const error = validatePayload(formData.type || 'bool', val);
+     setJsonError(error || '');
+  };
+
+  const handleTypeChange = (newType: string) => {
+      const currentType = formData.type || 'bool';
+      const currentValue = formData.value || '';
+      
+      // Save current value to cache
+      const updatedCache = { ...valueCache, [currentType]: currentValue };
+      setValueCache(updatedCache);
+
+      let nextValue = updatedCache[newType];
+
+      // If no cached value, use default for that type (no carry-over)
+      if (nextValue === undefined) {
+          switch (newType) {
+              case 'bool':
+                  nextValue = 'false';
+                  break;
+              case 'number':
+                  nextValue = '0.0';
+                  break;
+              case 'string':
+                  nextValue = 'str';
+                  break;
+              case 'json':
+                  nextValue = '{\n\t"a": 1,\n\t"b": "text"\n}';
+                  break;
+              case 'strategy':
+                  nextValue = JSON.stringify({
+                      default_value: "false",
+                      rules: [
+                          { attribute: "userId", operator: "in", value: ["1"], result: "true" }
+                      ]
+                  }, null, 2);
+                  break;
+              default:
+                  nextValue = '';
+          }
+      }
+      
+      setFormData({ ...formData, type: newType as any, value: nextValue });
+      
+      // Re-validate against new type and value
+      if (nextValue) {
+          const error = validatePayload(newType, nextValue);
+          setJsonError(error || '');
+      }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.key || !formData.value) return;
+    
+    // Final Validation
+    const error = validatePayload(formData.type || 'bool', formData.value);
+    if (error) {
+        setJsonError(error);
+        return;
+    }
 
     try {
       await featureService.create(formData as FeatureFlag);
@@ -41,18 +135,6 @@ export default function FeatureDrawer({ feature, isOpen, onClose, onSave }: Feat
       console.error(err);
       alert('Failed to save feature');
     }
-  };
-
-  const handleValueChange = (val: string) => {
-     setFormData({ ...formData, value: val });
-     if (formData.type === 'json' || formData.type === 'strategy') {
-         try {
-             JSON.parse(val);
-             setJsonError('');
-         } catch (e) {
-             setJsonError('Invalid JSON format');
-         }
-     }
   };
 
   return (
@@ -107,11 +189,12 @@ export default function FeatureDrawer({ feature, isOpen, onClose, onSave }: Feat
              <label className="block text-sm font-medium mb-1">Type</label>
              <select
                  value={formData.type || 'bool'}
-                 onChange={(e) => setFormData({...formData, type: e.target.value as any})}
+                 onChange={(e) => handleTypeChange(e.target.value)}
                  className="w-full rounded-md bg-secondary border-transparent px-3 py-2"
                  disabled={!!feature} 
              >
                  <option value="bool">Boolean</option>
+                 <option value="number">Number</option>
                  <option value="string">String</option>
                  <option value="json">JSON</option>
                  <option value="strategy">Strategy</option>
@@ -133,11 +216,29 @@ export default function FeatureDrawer({ feature, isOpen, onClose, onSave }: Feat
                     </button>
                     <span className={formData.value === 'true' ? 'font-bold' : 'text-muted-foreground'}>True</span>
                  </div>
+            ) : formData.type === 'number' ? (
+                 <div className="relative">
+                    <input 
+                        type="text" 
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={formData.value || ''}
+                        onChange={(e) => handleValueChange(e.target.value)}
+                        className={`w-full rounded-md bg-secondary border-transparent focus:border-primary focus:bg-background px-3 py-2 ${jsonError ? 'border-red-500' : ''}`}
+                        placeholder="0.00"
+                    />
+                     {jsonError && (
+                        <div className="mt-1 text-red-500 text-xs flex items-center">
+                             <AlertTriangle className="h-3 w-3 mr-1" /> {jsonError}
+                        </div>
+                    )}
+                 </div>
             ) : (
                 <div className="relative">
                     <textarea 
-                        rows={10}
+                        rows={formData.type === 'string' ? 3 : 10}
                         value={formData.value || ''}
+
                         onChange={(e) => handleValueChange(e.target.value)}
                         className={`w-full font-mono text-sm bg-black/80 text-green-400 p-4 rounded-md border ${jsonError ? 'border-red-500' : 'border-transparent'}`}
                     />

@@ -14,7 +14,7 @@ export interface AuthResponse {
 export interface FeatureFlag {
   id: number;
   key: string;
-  type: 'bool' | 'string' | 'json' | 'strategy';
+  type: 'bool' | 'string' | 'json' | 'strategy' | 'number';
   value: string;
   version: number;
   namespace: string;

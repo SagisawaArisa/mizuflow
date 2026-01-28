@@ -10,6 +10,7 @@ import (
 	"mizuflow/internal/repository"
 	v1 "mizuflow/pkg/api/v1"
 	"mizuflow/pkg/constraints"
+	"strconv"
 	"strings"
 
 	"mizuflow/internal/dto/resp"
@@ -64,6 +65,10 @@ func (s *FeatureService) GetCompensation(lastRev int64) ([]v1.Message, bool) {
 }
 
 func (s *FeatureService) SaveFeature(ctx context.Context, flag v1.FeatureFlag, operator string) (int, error) {
+	if err := s.validatePayload(flag.Type, flag.Value); err != nil {
+		return 0, err
+	}
+
 	var lastestVersion int
 	var outboxID uint64
 	// todo replacement for traceID
@@ -152,6 +157,43 @@ func (s *FeatureService) syncToEtcd(outboxID uint64, flag v1.FeatureFlag) {
 		return
 	}
 	_ = s.outboxRepo.UpdateStatus(context.Background(), outboxID, model.StatusCompleted, 0)
+}
+
+func (s *FeatureService) validatePayload(typeStr, value string) error {
+	switch typeStr {
+	case constraints.TypeBool:
+		if value != "true" && value != "false" {
+			return errors.New("invalid boolean value")
+		}
+	case constraints.TypeNumber:
+		if _, err := strconv.ParseFloat(value, 64); err != nil {
+			return errors.New("invalid number value")
+		}
+	case constraints.TypeStrategy:
+		var strategy v1.FeatureStrategy
+		if err := json.Unmarshal([]byte(value), &strategy); err != nil {
+			return fmt.Errorf("invalid json value: %w", err)
+		}
+		if strategy.DefaultValue == "" {
+			return errors.New("strategy must have a default value")
+		}
+		for _, rule := range strategy.Rules {
+			if rule.Attribute == "" || rule.Operator == "" {
+				return errors.New("strategy rule must have attribute and operator")
+			}
+			// todo further validation can be added here
+		}
+	case constraints.TypeJSON:
+		if !json.Valid([]byte(value)) {
+			return errors.New("invalid json value")
+		}
+	case constraints.TypeString:
+		// no validation needed
+		return nil
+	default:
+		return errors.New("unknown feature type")
+	}
+	return nil
 }
 
 func (s *FeatureService) GetFeature(ctx context.Context, namespace, env, key string) (*resp.FeatureItem, error) {
