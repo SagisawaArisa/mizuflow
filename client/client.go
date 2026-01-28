@@ -12,6 +12,7 @@ import (
 	"mizuflow/pkg/constraints"
 	"mizuflow/pkg/logger"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,34 +30,73 @@ type MizuClient struct {
 	namespaces []string
 	apiKey     string
 	httpClient *http.Client
+	cacheFile  string
+
+	snapshotIntervalMin time.Duration
+	snapshotIntervalMax time.Duration
 
 	mu       sync.RWMutex
 	features map[string]v1.FeatureFlag
 	lastRev  int64
+	isDirty  bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewMizuClient(addr, env, apiKey string, namespaces []string) *MizuClient {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &MizuClient{
-		addr:       addr,
-		env:        env,
-		apiKey:     apiKey,
-		namespaces: namespaces,
-		httpClient: &http.Client{Timeout: 0},
-		features:   make(map[string]v1.FeatureFlag),
-		ctx:        ctx,
-		cancel:     cancel,
+type Option func(*MizuClient)
+
+func WithCacheFile(path string) Option {
+	return func(c *MizuClient) {
+		c.cacheFile = path
 	}
+}
+
+func WithHTTPClient(client *http.Client) Option {
+	return func(c *MizuClient) {
+		c.httpClient = client
+	}
+}
+
+func WithSnapshotInterval(min, max time.Duration) Option {
+	return func(c *MizuClient) {
+		c.snapshotIntervalMin = min
+		c.snapshotIntervalMax = max
+	}
+}
+
+func NewMizuClient(addr, env, apiKey string, namespaces []string, opts ...Option) *MizuClient {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &MizuClient{
+		addr:                addr,
+		env:                 env,
+		apiKey:              apiKey,
+		namespaces:          namespaces,
+		cacheFile:           ".mizu_cache.json",
+		httpClient:          &http.Client{Timeout: 10 * time.Second},
+		snapshotIntervalMin: 10 * time.Second,
+		snapshotIntervalMax: 30 * time.Second,
+		features:            make(map[string]v1.FeatureFlag),
+		ctx:                 ctx,
+		cancel:              cancel,
+	}
+
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
 func (c *MizuClient) Start() error {
 	if err := c.fetchAll(); err != nil {
-		return err
+		logger.Warn("failed to fetch from server, attempting to load from local cache", zap.Error(err))
+		if loadErr := c.loadSnapshot(); loadErr != nil {
+			return fmt.Errorf("failed to fetch from server: %w, and failed to load from cache: %w", err, loadErr)
+		}
+		logger.Info("loaded features from local cache persistence")
 	}
 	go c.runWatchLoop()
+	go c.runSnapshotLoop()
 	return nil
 }
 
@@ -86,6 +126,7 @@ func (c *MizuClient) fetchAll() error {
 		c.features[f.Key] = f
 	}
 	c.lastRev = res.Revision
+	c.isDirty = true
 	return nil
 }
 
@@ -219,6 +260,7 @@ func (c *MizuClient) handleUpdate(msg v1.Message) {
 	}
 
 	c.lastRev = msg.Revision
+	c.isDirty = true
 }
 
 func (c *MizuClient) IsEnabled(key string, context map[string]string) bool {
@@ -310,4 +352,74 @@ func (c *MizuClient) matchRule(rule v1.Rule, content map[string]string) bool {
 	}
 
 	return false
+}
+
+type snapshot struct {
+	Features map[string]v1.FeatureFlag `json:"features"`
+	Revision int64                     `json:"revision"`
+}
+
+func (c *MizuClient) runSnapshotLoop() {
+	var (
+		minInterval = c.snapshotIntervalMin
+		maxInterval = c.snapshotIntervalMax
+	)
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(minInterval + time.Duration(rand.Int63n(int64(maxInterval-minInterval)))):
+			c.mu.Lock()
+			if !c.isDirty {
+				c.mu.Unlock()
+				continue
+			}
+			c.isDirty = false
+			c.mu.Unlock()
+
+			c.saveSnapshot()
+		}
+	}
+}
+
+func (c *MizuClient) saveSnapshot() {
+	c.mu.RLock()
+	data := snapshot{
+		Features: c.features,
+		Revision: c.lastRev,
+	}
+	bytes, err := json.Marshal(data)
+	c.mu.RUnlock()
+
+	if err != nil {
+		logger.Error("failed to marshal snapshot", zap.Error(err))
+		return
+	}
+
+	tmpFile := c.cacheFile + ".tmp"
+	if err := os.WriteFile(tmpFile, bytes, 0644); err != nil {
+		logger.Error("failed to write temp snapshot file", zap.Error(err))
+		return
+	}
+	if err := os.Rename(tmpFile, c.cacheFile); err != nil {
+		logger.Error("failed to rename snapshot file", zap.Error(err))
+	}
+}
+
+func (c *MizuClient) loadSnapshot() error {
+	data, err := os.ReadFile(c.cacheFile)
+	if err != nil {
+		return err
+	}
+
+	var s snapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.features = s.Features
+	c.lastRev = s.Revision
+	return nil
 }
