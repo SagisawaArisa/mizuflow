@@ -1,8 +1,10 @@
-package logger
+package middleware
 
 import (
 	"net/http"
 	"time"
+
+	"mizuflow/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,7 +22,7 @@ func GinZapLogger() gin.HandlerFunc {
 		cost := time.Since(start)
 		status := c.Writer.Status()
 
-		Info("http_request",
+		logger.Info("http_request",
 			zap.Int("status", status),
 			zap.String("method", c.Request.Method),
 			zap.String("path", path),
@@ -36,7 +38,7 @@ func GinZapRecovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				Error("panic recovered",
+				logger.Error("panic recovered",
 					zap.Any("error", err),
 					zap.String("path", c.Request.URL.Path),
 					zap.Stack("stack"),

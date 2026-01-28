@@ -1,0 +1,27 @@
+server:
+  environment: dev
+  port: :8080
+
+mysql:
+  dsn: "root:root@tcp(localhost:3307)/mizuflow?charset=utf8mb4&parseTime=True&loc=Local"
+
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+
+etcd:
+  endpoints:
+    - "localhost:2379"
+  dial_timeout: 5s
+
+workers:
+  outbox_interval: 1s
+  reconciler_interval: 1h
+
+stream:
+  heartbeat_interval: 15s
+
+auth:
+  access_token_ttl: 15m
+  refresh_token_ttl: 168h # 7 days

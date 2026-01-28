@@ -1,28 +1,40 @@
 package logger
 
 import (
+	"sync"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var l *zap.Logger
+var (
+	l    *zap.Logger
+	once sync.Once
+)
 
 func InitLogger(env string) {
-	var cfg zap.Config
+	once.Do(func() {
+		var cfg zap.Config
 
-	if env == "prod" {
-		cfg = zap.NewProductionConfig()
-		cfg.EncoderConfig.TimeKey = "time"
-		cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	} else {
-		cfg = zap.NewDevelopmentConfig()
-	}
+		if env == "prod" {
+			cfg = zap.NewProductionConfig()
+			cfg.EncoderConfig.TimeKey = "time"
+			cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		} else {
+			cfg = zap.NewDevelopmentConfig()
+			cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		}
 
-	logger, err := cfg.Build(zap.AddCaller(), zap.AddCallerSkip(1))
-	if err != nil {
-		panic(err)
-	}
+		logger, err := cfg.Build(zap.AddCaller(), zap.AddCallerSkip(1))
+		if err != nil {
+			panic(err)
+		}
 
+		l = logger
+	})
+}
+
+func SetLogger(logger *zap.Logger) {
 	l = logger
 }
 

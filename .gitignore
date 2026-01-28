@@ -1,29 +1,30 @@
-# Binaries
 bin/
 dist/
-delta-conf
+build/
+node_modules/
+mizuflow
+*.exe
 
-# Go
 vendor/
 *.test
 *.out
+coverage
 coverage.txt
+coverage.html
 
-# IDEs
 .vscode/
 .github/
 .idea/
 *.swp
 *.swo
 
-# OS
 .DS_Store
 Thumbs.db
 
-# Logs
 *.log
 
-# Environment
 .env
 .env.*
 !.env.example
+
+mysql/data/
