@@ -14,9 +14,11 @@ func init() {
 
 type MockObserver struct{}
 
-func (m *MockObserver) IncOnline()  {}
-func (m *MockObserver) DecOnline()  {}
-func (m *MockObserver) RecordPush() {}
+func (m *MockObserver) IncOnline()                          {}
+func (m *MockObserver) DecOnline()                          {}
+func (m *MockObserver) RecordPush()                         {}
+func (m *MockObserver) ObservePushLatency(duration float64) {}
+func (m *MockObserver) UpdateEventLag(lag int)              {}
 
 func TestHub_Concurrency(t *testing.T) {
 	hub := NewHub(&MockObserver{}, 100*time.Millisecond, 512)

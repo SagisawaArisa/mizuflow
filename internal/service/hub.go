@@ -112,6 +112,7 @@ func (h *Hub) Run() {
 				removeClient(client)
 			}
 		case message := <-h.Broadcast:
+			start := time.Now()
 			for client := range wildcards {
 				sendMessage(client, message)
 			}
@@ -122,7 +123,11 @@ func (h *Hub) Run() {
 					}
 				}
 			}
+			h.observer.ObservePushLatency(time.Since(start).Seconds())
+			h.observer.RecordPush()
 		case <-heartbeatTicker.C:
+			// TODO: record with another ticker to reduce time gap
+			h.observer.UpdateEventLag(len(h.Broadcast))
 			// TODO: [Optimization] Implement Jittering Heartbeat
 			// Instead of a global ticker triggering all clients at once, assign a randomized next_heartbeat_time for each client.
 			// Formula: LastActivity + Interval + RandomOffset(-100ms, +100ms)
