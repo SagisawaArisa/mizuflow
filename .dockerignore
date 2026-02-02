@@ -1,0 +1,26 @@
+# Ignore git directory
+.git
+.github
+
+# Ignore build artifacts
+*.exe
+*.test
+*.out
+bin/
+coverage/
+
+# Ignore local config (will be mounted or env vars)
+config.yaml
+.env
+
+# Ignore dependency directories if present (managed by modules)
+vendor/
+
+# Ignore web artifacts
+web/node_modules
+web/dist
+
+# Ignore local database data
+mysql/data/
+mysql/init/
+
