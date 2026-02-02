@@ -59,3 +59,13 @@ CREATE TABLE IF NOT EXISTS `sdk_clients` (
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE INDEX `idx_api_key_env` (`api_key`, `env`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MizuFlow SDK clients table';
+
+INSERT INTO `sdk_clients` (`app_id`, `api_key`, `env`, `status`)
+VALUES 
+    ('admin-cli', 'mizu-admin-key-1', 'dev', 1),
+    ('web-portal', 'mizu-web-key', 'dev', 1),
+    ('load-test', 'load-test-key-1', 'dev', 1);
+
+INSERT IGNORE INTO `feature_master` (`env`, `namespace`, `key`, `current_val`, `type`, `version`)
+VALUES 
+    ('dev', 'default', 'loadtest-latency-check', '0', 'string', 1);

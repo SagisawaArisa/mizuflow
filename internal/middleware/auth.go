@@ -6,8 +6,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func SDKAuthMiddleware(repo repository.SDKRepository) gin.HandlerFunc {
+func SDKAuthMiddleware(repo repository.SDKRepository, bypassAuth bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if bypassAuth {
+			c.Next()
+			return
+		}
+
 		apiKey := c.GetHeader("X-Mizu-Key")
 		env := c.Query("env")
 

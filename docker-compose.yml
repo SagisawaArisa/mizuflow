@@ -1,4 +1,30 @@
+version: '3.8'
+
 services:
+  server:
+    build: .
+    container_name: mizu-server
+    depends_on:
+      - mysql
+      - etcd
+      - redis
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - MIZU_SERVER_ENVIRONMENT=loadtest
+      - MIZU_SERVER_PORT=0.0.0.0:8080
+      - MIZU_MYSQL_DSN=root:root@tcp(mizu-mysql:3306)/mizuflow?charset=utf8mb4&parseTime=True&loc=Local
+      - MIZU_REDIS_ADDR=mizu-redis:6379
+      - MIZU_ETCD_ENDPOINTS=mizu-etcd:2379
+    networks:
+      - mizu-network
+    restart: on-failure
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+
   mysql:
     image: mysql:8.0
     container_name: mizu-mysql
@@ -15,6 +41,9 @@ services:
       - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
+    networks:
+      - mizu-network
+
   etcd:
     image: quay.io/coreos/etcd:v3.5.9
     container_name: mizu-etcd

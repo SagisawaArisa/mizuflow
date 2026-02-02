@@ -9,8 +9,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler, authHandler *AuthHandler, sdkRepo repository.SDKRepository, rdb *redis.Client, requestsPerSecond int) *gin.Engine {
+func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler, authHandler *AuthHandler, sdkRepo repository.SDKRepository, rdb *redis.Client, requestsPerSecond int, env string) *gin.Engine {
 	r := gin.New()
+
+	// Determine if we should bypass auth (e.g. for load testing)
+	bypassAuth := env == "loadtest"
 
 	// Global Middleware
 	r.Use(
@@ -44,7 +47,7 @@ func RegisterRoutes(featureHandler *FeatureHandler, streamHandler *StreamHandler
 
 	// Stream Routes (Protected by SDK Key)
 	stream := r.Group("/v1/stream")
-	stream.Use(middleware.SDKAuthMiddleware(sdkRepo))
+	stream.Use(middleware.SDKAuthMiddleware(sdkRepo, bypassAuth))
 	{
 		stream.GET("/watch", streamHandler.WatchFeature)
 		stream.GET("/snapshot", streamHandler.FetchAll)
