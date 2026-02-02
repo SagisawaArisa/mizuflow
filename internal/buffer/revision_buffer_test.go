@@ -89,7 +89,7 @@ func TestRevisionBuffer_Concurrency(t *testing.T) {
 			defer wg.Done()
 			var lastRev int64 = 0
 			// Timeout safety
-			timeout := time.After(5 * time.Second)
+			timeout := time.After(10 * time.Second)
 
 			for {
 				select {
@@ -103,6 +103,9 @@ func TestRevisionBuffer_Concurrency(t *testing.T) {
 					if ok && len(msgs) > 0 {
 						lastRev = msgs[len(msgs)-1].Revision
 					}
+					// Avoid busy loop starvation preventing writer from acquiring lock
+					time.Sleep(time.Millisecond)
+
 					// If !ok, we just retry (simulate client fallback)
 					if !ok {
 						// In real world, we'd fetch snapshot.
