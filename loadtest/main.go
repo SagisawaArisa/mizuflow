@@ -2,12 +2,15 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,16 +25,24 @@ var (
 	totalVUs   = flag.Int("c", 2000, "Total Virtual Users (Concurrency)")
 	rampUp     = flag.Duration("ramp", 60*time.Second, "Ramp up duration")
 	featureKey = flag.String("feature", "loadtest-latency-check", "Feature key to measure")
+
+	// Trigger/Sender Configuration
+	enableTrigger  = flag.Bool("trigger", false, "Enable internal automated update trigger")
+	adminBaseURL   = flag.String("admin", "http://localhost:8080", "Admin API Base URL")
+	updateInterval = flag.Duration("interval", 5*time.Second, "Interval between updates")
+	adminUser      = flag.String("user", "admin", "Admin Username")
+	adminPass      = flag.String("pass", "admin123", "Admin Password")
 )
 
 // Metrics
 var (
-	activeClients int64
-	totalconnects int64
-	connectErrors int64
-	messagesRx    int64
-	latencySum    int64 // milliseconds
-	latencyCount  int64
+	activeClients   int64
+	totalconnects   int64
+	connectErrors   int64
+	messagesRx      int64 // Delta (reset every tick)
+	totalMessagesRx int64 // Cumulative
+	latencySum      int64 // milliseconds
+	latencyCount    int64
 )
 
 type EventMessage struct {
@@ -52,36 +63,86 @@ func main() {
 	// Disable HTTP/2 for simpler SSE handling in this load test if needed,
 	// but standard client usually negotiates fine.
 	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-	http.DefaultTransport.(*http.Transport).MaxIdleConns = *totalVUs
-	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = *totalVUs
+	// Important: Buffer connection limit to allow Trigger/Login + VUs
+	bufferConns := 10
+	http.DefaultTransport.(*http.Transport).MaxIdleConns = *totalVUs + bufferConns
+	http.DefaultTransport.(*http.Transport).MaxConnsPerHost = *totalVUs + bufferConns
 
 	var wg sync.WaitGroup
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Pre-flight Trigger Setup (Run BEFORE launching massive connections)
+	var triggerToken string
+	if *enableTrigger {
+		fmt.Println("🔫 Trigger enabled. Performing synchronous login check...")
+		var err error
+		triggerToken, err = login(*adminBaseURL, *adminUser, *adminPass)
+		if err != nil {
+			fmt.Printf("❌ TRIGGER LOGIN FAILED: %v\n", err)
+			fmt.Println("⚠️  Continuing without auto-trigger...")
+			*enableTrigger = false
+		} else {
+			fmt.Println("✅ Trigger logged in successfully. Token acquired.")
+		}
+	}
+
 	// Metric Reporter
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+		// Log file
+		f, err := os.Create("latency.csv")
+		if err == nil {
+			defer f.Close()
+			f.WriteString("time,active_users,rate,avg_latency_ms\n")
+		}
+
+		// Refresh faster (500ms) for more "real-time" feel
+		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
+
+		var lastValidLatency float64
+		startTime := time.Now()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
 				currentActive := atomic.LoadInt64(&activeClients)
-				total := atomic.LoadInt64(&totalconnects)
-				errs := atomic.LoadInt64(&connectErrors)
-				msgs := atomic.SwapInt64(&messagesRx, 0)
+				// total := atomic.LoadInt64(&totalconnects) // Less important once stable
+				// errs := atomic.LoadInt64(&connectErrors)
+
+				// Get delta and reset
+				msgsDelta := atomic.SwapInt64(&messagesRx, 0)
+
+				// Get cumulative
+				msgsTotal := atomic.LoadInt64(&totalMessagesRx)
+
 				latSum := atomic.SwapInt64(&latencySum, 0)
 				latCnt := atomic.SwapInt64(&latencyCount, 0)
 
-				avgLat := float64(0)
+				// Calculate Rate per second (since ticker is 500ms, rate is delta * 2)
+				rate := msgsDelta * 2
+
+				// Convert Microseconds sum to Milliseconds average
+				avgLatMs := lastValidLatency
 				if latCnt > 0 {
-					avgLat = float64(latSum) / float64(latCnt)
+					avgLatMs = (float64(latSum) / float64(latCnt)) / 1000.0
+					lastValidLatency = avgLatMs
 				}
 
-				fmt.Printf("[%s] Active: %d | Total: %d | Errors: %d | Msgs/s: %d | Avg Latency: %.2f ms\n",
-					time.Now().Format("15:04:05"), currentActive, total, errs, msgs, avgLat)
+				// Write to CSV
+				if f != nil {
+					elapsed := time.Since(startTime).Seconds()
+					fmt.Fprintf(f, "%.2f,%d,%d,%.3f\n", elapsed, currentActive, rate, avgLatMs)
+				}
+
+				// Clear screen line or just append? Append is safer for history.
+				// Format: Time | Active | Rate | Total | Latency
+				if currentActive > 0 || msgsTotal > 0 {
+					fmt.Printf("\r[%s] Conns: %-5d | Rate: %-5d/s | Total Rx: %-6d | Latency: %.3f ms   ",
+						time.Now().Format("15:04:05"), currentActive, rate, msgsTotal, avgLatMs)
+				}
 			}
 		}
 	}()
@@ -98,9 +159,111 @@ func main() {
 	}
 
 	// Keep alive
-	fmt.Println("✅ All VUs launched. Waiting...")
+	fmt.Println("✅ All VUs launched.")
+
+	if *enableTrigger && triggerToken != "" {
+		fmt.Println("🔫 Starting background update loop...")
+		go runTriggerLoop(triggerToken)
+	} else {
+		fmt.Println("ℹ️ Trigger disabled/failed. Waiting for external updates...")
+	}
+
+	fmt.Println("⏳ Waiting...")
 	wg.Wait()
 }
+
+// --- Trigger Logic (Sender) ---
+
+func runTriggerLoop(token string) {
+	// Use a clean Transport for Trigger to avoid contention with SSE pool limits
+	triggerTransport := &http.Transport{
+		MaxIdleConns:      10,
+		IdleConnTimeout:   30 * time.Second,
+		DisableKeepAlives: true, // Force new connection for each trigger (safer for debug)
+	}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: triggerTransport,
+	}
+
+	ticker := time.NewTicker(*updateInterval)
+
+	// Immediate first send
+	sendUpdate(client, *adminBaseURL, token)
+
+	for range ticker.C {
+		sendUpdate(client, *adminBaseURL, token)
+	}
+}
+
+func login(baseURL, user, pass string) (string, error) {
+	loginURL := fmt.Sprintf("%s/v1/auth/login", baseURL)
+
+	body := map[string]string{"username": user, "password": pass}
+	jsonBody, _ := json.Marshal(body)
+
+	// Use independent Transport to avoid blocking by SSE pool
+	loginTransport := &http.Transport{DisableKeepAlives: true}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: loginTransport,
+	}
+
+	resp, err := client.Post(loginURL, "application/json", bytes.NewBuffer(jsonBody))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	var res map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+
+	return res["access_token"].(string), nil
+}
+
+func sendUpdate(client *http.Client, baseURL, token string) {
+	// Debug: Print URL to confirm where we are sending
+	updateURL := fmt.Sprintf("%s/v1/feature", baseURL)
+
+	// Use String type for high precision timestamp
+	// Using Microseconds to avoid 0ms latency on localhost
+	ts := time.Now().UnixMicro()
+	// Dynamic key to force new entries/logs
+	dynamicKey := fmt.Sprintf("%s-%d", *featureKey, ts)
+
+	payload := map[string]string{
+		"namespace": "default",
+		"env":       "dev",
+		"key":       dynamicKey,
+		"value":     fmt.Sprintf("%d", ts),
+		"type":      "string",
+	}
+	jsonBody, _ := json.Marshal(payload)
+
+	req, _ := http.NewRequest("POST", updateURL, bytes.NewBuffer(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Printf("⚠️ Trigger send failed: %v\n", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		fmt.Printf("\n⚠️ Trigger FAILED status %d: %s\n", resp.StatusCode, string(b))
+	}
+}
+
+// --- Client Logic (Receiver) ---
 
 func runClient(ctx context.Context, id int) {
 	req, err := http.NewRequestWithContext(ctx, "GET", *targetURL, nil)
@@ -148,23 +311,29 @@ func runClient(ctx context.Context, id int) {
 		}
 
 		line = strings.TrimSpace(line)
+
 		if strings.HasPrefix(line, "data:") {
 			data := strings.TrimPrefix(line, "data:")
 			var msg EventMessage
 			if err := json.Unmarshal([]byte(data), &msg); err == nil {
 				atomic.AddInt64(&messagesRx, 1)
+				atomic.AddInt64(&totalMessagesRx, 1)
 
-				// Calculate Latency if it matches our measurement key
-				if msg.Key == *featureKey {
-					// Value is expected to be a unix timestamp (ms) string
-					sentTime, err := strconv.ParseInt(msg.Value, 10, 64)
-					if err == nil {
-						latency := time.Now().UnixMilli() - sentTime
-						// Filter reasonable range to avoid clock skew weirdness
-						if latency >= 0 && latency < 10000 {
-							atomic.AddInt64(&latencySum, latency)
-							atomic.AddInt64(&latencyCount, 1)
-						}
+				// Calculate Latency
+				if strings.Contains(msg.Key, *featureKey) {
+					tsStr := msg.Value
+					// Try parsing microseconds
+					sentTime, err := strconv.ParseInt(tsStr, 10, 64)
+					if err != nil {
+						// Fallback/Debug: Maybe it got quoted/escaped weirdly?
+						// fmt.Printf("Parse Error: %s\n", tsStr)
+						return
+					}
+
+					latencyMicros := time.Now().UnixMicro() - sentTime
+					if latencyMicros >= 0 && latencyMicros < 10000000 {
+						atomic.AddInt64(&latencySum, latencyMicros)
+						atomic.AddInt64(&latencyCount, 1)
 					}
 				}
 			}

@@ -27,3 +27,8 @@ Thumbs.db
 !.env.example
 
 mysql/data/
+# Loadtest artifacts
+*.csv
+*.png
+__pycache__/
+
