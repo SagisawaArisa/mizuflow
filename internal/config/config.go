@@ -47,6 +47,7 @@ type WorkersConfig struct {
 
 type StreamConfig struct {
 	HeartbeatInterval time.Duration `mapstructure:"heartbeat_interval"`
+	HubBufferSize     int           `mapstructure:"hub_buffer_size"`
 }
 
 type AuthConfig struct {

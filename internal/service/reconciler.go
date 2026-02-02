@@ -90,9 +90,13 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	batchSize := r.config.BatchSize
 	offset := 0
 	for {
+		// TODO: Circuit Breaker for DB Outage
+		// In a disaster scenario where MySQL is down, the Reconciler MUST NOT overwrite Etcd data.
+		// If db read fails, we should abort the reconciliation process immediately to preserve
+		// any emergency flags manually set in Etcd (which might be the source of truth during an outage).
 		dbFeatures, err := r.featureRepo.ListByPage(ctx, offset, batchSize)
 		if err != nil {
-			logger.Error("recon: failed to fetch features from db", zap.Error(err))
+			logger.Error("recon: failed to fetch features from db, aborting to prevent unsafe overwrite", zap.Error(err))
 			return
 		}
 		if len(dbFeatures) == 0 {

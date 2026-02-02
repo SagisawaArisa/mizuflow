@@ -19,7 +19,7 @@ func (m *MockObserver) DecOnline()  {}
 func (m *MockObserver) RecordPush() {}
 
 func TestHub_Concurrency(t *testing.T) {
-	hub := NewHub(&MockObserver{}, 100*time.Millisecond)
+	hub := NewHub(&MockObserver{}, 100*time.Millisecond, 512)
 	go hub.Run()
 
 	var wg sync.WaitGroup

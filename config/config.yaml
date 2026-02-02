@@ -1,6 +1,6 @@
 server:
   environment: dev
-  port: :8080
+  port: 0.0.0.0:8080
 
 mysql:
   dsn: "root:root@tcp(localhost:3307)/mizuflow?charset=utf8mb4&parseTime=True&loc=Local"
@@ -23,6 +23,7 @@ workers:
 
 stream:
   heartbeat_interval: 15s
+  hub_buffer_size: 4096
 
 auth:
   access_token_ttl: 15m

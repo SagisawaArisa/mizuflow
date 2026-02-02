@@ -71,7 +71,7 @@ func run(cfg *config.Config) error {
 
 	// 5. Initialize Services
 	observer := metrics.NewPrometheusObserver()
-	hub := service.NewHub(observer, cfg.Stream.HeartbeatInterval)
+	hub := service.NewHub(observer, cfg.Stream.HeartbeatInterval, cfg.Stream.HubBufferSize)
 
 	svc := service.NewFeatureService(db, etcdRepo, mysqlRepo, featureRepo, outboxRepo, hub)
 	authSvc := service.NewAuthService(rdb, cfg.Auth.AccessTokenTTL, cfg.Auth.RefreshTokenTTL)
@@ -110,6 +110,7 @@ func run(cfg *config.Config) error {
 		sdkRepo,
 		rdb,
 		cfg.RateLimit.RequestsPerSecond,
+		cfg.Server.Environment, // Pass the environment here
 	)
 
 	srv := &http.Server{

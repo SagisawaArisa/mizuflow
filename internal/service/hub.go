@@ -23,12 +23,15 @@ type Hub struct {
 	heartbeatInterval time.Duration
 }
 
-func NewHub(obs metrics.HubObserver, heartbeatInterval time.Duration) *Hub {
+func NewHub(obs metrics.HubObserver, heartbeatInterval time.Duration, bufferSize int) *Hub {
+	if bufferSize <= 0 {
+		bufferSize = 512 // fallback default
+	}
 	return &Hub{
 		clients:           make(map[*Client]bool),
 		Broadcast:         make(chan v1.Message),
-		Register:          make(chan *Client, 512),
-		Unregister:        make(chan *Client, 512),
+		Register:          make(chan *Client, bufferSize),
+		Unregister:        make(chan *Client, bufferSize),
 		observer:          obs,
 		heartbeatInterval: heartbeatInterval,
 	}
@@ -120,6 +123,16 @@ func (h *Hub) Run() {
 				}
 			}
 		case <-heartbeatTicker.C:
+			// TODO: [Optimization] Implement Jittering Heartbeat
+			// Instead of a global ticker triggering all clients at once, assign a randomized next_heartbeat_time for each client.
+			// Formula: LastActivity + Interval + RandomOffset(-100ms, +100ms)
+			// This spreads CPU load and network spikes evenly across the timeline.
+
+			// TODO: [Optimization] Implement Lazy Heartbeat
+			// Only send a ping if no meaningful config updates (Broadcasts) have been sent in the last interval (15s).
+			// If a client received a config update 2s ago, they know the connection is alive, so skip the ping.
+			// This reduces redundant bandwidth usage.
+
 			heartbeat := v1.Message{
 				Type: "ping",
 			}
