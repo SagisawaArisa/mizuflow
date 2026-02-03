@@ -28,7 +28,7 @@ Thumbs.db
 
 mysql/data/
 # Loadtest artifacts
-*.csv
-*.png
+latency.csv
+latency_plot.png
 __pycache__/
 
